@@ -1,0 +1,12 @@
+path: data_microgravity
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: Item_Class_0
+  1: Item_Class_1
+  2: Item_Class_2
+  3: Item_Class_3
+  4: Item_Class_4
+  # Placeholder for true classes, you can overwrite this with your specific item classes

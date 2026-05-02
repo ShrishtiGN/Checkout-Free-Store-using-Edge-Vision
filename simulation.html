@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RetailEye Antigravity Simulator</title>
+    <style>
+        body { 
+            background: #111; 
+            color: white; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            margin: 0; 
+            font-family: 'Courier New', Courier, monospace; 
+            overflow: hidden;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 350px;
+            background: rgba(30, 30, 30, 0.85);
+            border: 2px solid rgba(100, 100, 100, 0.8);
+            padding: 20px;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
+            z-index: 10;
+        }
+        #edge-dashboard {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background: rgba(10, 20, 30, 0.85);
+            border: 2px solid rgba(0, 150, 255, 0.8);
+            padding: 15px;
+            box-shadow: 0 0 20px rgba(0, 150, 255, 0.4);
+            z-index: 10;
+        }
+        h3 {
+            color: #0ff;
+            margin-top: 0;
+            border-bottom: 1px solid #0ff;
+            padding-bottom: 10px;
+        }
+        .enforcements {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #f90;
+            background: rgba(255, 153, 0, 0.1);
+        }
+        .enforcements h4 {
+            margin: 0 0 5px 0;
+            color: #f90;
+        }
+        .enforcements ul {
+            margin: 0; padding-left: 20px; font-size: 13px; color: #ddd;
+        }
+        .item-data { margin-bottom: 20px; font-size: 14px; }
+        .drifting { color: #f55; }
+        .billed { color: #5f5; }
+        .telemetry { color: #aaa; font-size: 12px; }
+        
+        .dash-row { margin-bottom: 10px; font-weight: bold; font-size: 14px; }
+        .dash-val { color: #fff; }
+        .latency-high { color: #ff3333 !important; text-shadow: 0 0 5px red; }
+        .latency-ok { color: #33ff33 !important; }
+
+        canvas {
+            border: 2px solid #555;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="hud">
+        <h3>TELEMETRY & PHYSICS</h3>
+        <div id="telemetryData"></div>
+        <div class="enforcements">
+            <h4>EDGE ENFORCEMENTS ACTIVE:</h4>
+            <ul>
+                <li>On-device inference only (no cloud APIs)</li>
+                <li>Model size limits (e.g., &lt;50MB)</li>
+                <li>Latency targets (e.g., &lt;100ms)</li>
+                <li>Power efficiency scoring</li>
+                <br/>
+                <li>* Every solution should be different</li>
+                <li>* Maintain time limit</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Edge-AI Health Dashboard -->
+    <div id="edge-dashboard">
+        <h3 style="color: #0bd;">EDGE HEALTH DASHBOARD</h3>
+        <div class="dash-row" style="color:#aaa;">Source: <span class="dash-val" style="color:#0f0;">Status: LOCAL (Edge)</span></div>
+        <div class="dash-row" style="color:#aaa;">Model: <span class="dash-val">YOLOv11-Tiny | Size: 42MB</span></div>
+        <div class="dash-row" style="color:#aaa;">Latency Tracker: <span id="dash-latency" class="dash-val latency-ok">84ms</span></div>
+        <div class="dash-row" style="color:#aaa;">Target Limit: <span class="dash-val">&lt; 100ms</span></div>
+        <hr style="border: 1px solid #334;"/>
+        <div class="dash-row" style="color:#aaa;">NPU Utilization: <span id="dash-npu" class="dash-val">45%</span></div>
+        <div class="dash-row" style="color:#aaa;">Score: <span id="dash-pwr" class="dash-val" style="font-size: 18px; color: #ff0;">A</span></div>
+    </div>
+    
+    <canvas id="simCanvas" width="1200" height="800"></canvas>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const hud = document.getElementById('telemetryData');
+        const latencyEl = document.getElementById('dash-latency');
+        const npuEl = document.getElementById('dash-npu');
+        const pwrEl = document.getElementById('dash-pwr');
+
+        // Containment Zone (Float Bag)
+        const zone = { xMin: 450, yMin: 200, xMax: 850, yMax: 600 };
+
+        class FloatingItem {
+            constructor(id, price) {
+                this.id = id;
+                this.price = price;
+                this.x = 400 + Math.random() * 500;
+                this.y = 100 + Math.random() * 500;
+                this.w = 80; this.h = 100; this.d = 40;
+                
+                this.vx = (Math.random() - 0.5) * 8;
+                this.vy = (Math.random() - 0.5) * 8;
+                this.vz = (Math.random() - 0.5) * 4;
+                this.v_rot = 10 + Math.random() * 35;
+                
+                this.billed = false;
+            }
+
+            update() {
+                this.x += this.vx; this.y += this.vy;
+                if (this.x < 420 || this.x > canvas.width - 50) this.vx *= -1;
+                if (this.y < 50 || this.y > canvas.height - 50) this.vy *= -1;
+                let inZone = (this.x >= zone.xMin && this.x <= zone.xMax && this.y >= zone.yMin && this.y <= zone.yMax);
+                if(inZone) this.billed = true;
+            }
+
+            draw() {
+                const color = this.billed ? '#0f0' : '#f00';
+                ctx.strokeStyle = color; ctx.lineWidth = 2;
+                
+                let hw = this.w/2, hh = this.h/2, hd = this.d/2;
+                let zx = hd * 0.5, zy = hd * 0.5;
+
+                let fl_t = {x: this.x - hw, y: this.y - hh}; let fr_t = {x: this.x + hw, y: this.y - hh};
+                let fl_b = {x: this.x - hw, y: this.y + hh}; let fr_b = {x: this.x + hw, y: this.y + hh};
+                let bl_t = {x: this.x - hw + zx, y: this.y - hh - zy}; let br_t = {x: this.x + hw + zx, y: this.y - hh - zy};
+                let bl_b = {x: this.x - hw + zx, y: this.y + hh - zy}; let br_b = {x: this.x + hw + zx, y: this.y + hh - zy};
+
+                ctx.beginPath();
+                ctx.moveTo(fl_t.x, fl_t.y); ctx.lineTo(fr_t.x, fr_t.y); ctx.lineTo(fr_b.x, fr_b.y); ctx.lineTo(fl_b.x, fl_b.y);
+                ctx.closePath(); ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(bl_t.x, bl_t.y); ctx.lineTo(br_t.x, br_t.y); ctx.lineTo(br_b.x, br_b.y); ctx.lineTo(bl_b.x, bl_b.y);
+                ctx.closePath(); ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(fl_t.x, fl_t.y); ctx.lineTo(bl_t.x, bl_t.y); ctx.moveTo(fr_t.x, fr_t.y); ctx.lineTo(br_t.x, br_t.y);
+                ctx.moveTo(fl_b.x, fl_b.y); ctx.lineTo(bl_b.x, bl_b.y); ctx.moveTo(fr_b.x, fr_b.y); ctx.lineTo(br_b.x, br_b.y);
+                ctx.stroke();
+
+                ctx.fillStyle = this.billed ? '#0f0' : '#fff';
+                let tag = this.billed ? `CHARGED: $${this.price}` : `ID-${this.id}`;
+                
+                // --- UNIQUE METRIC DISPLAY STYLES PER CLASS ID ---
+                if (this.id === 1) {
+                    // Style 1: Matrix style above the box, standard text
+                    ctx.font = "14px monospace";
+                    ctx.fillText(tag, this.x - hw, this.y - hh - 25);
+                    ctx.fillStyle = '#0ff';
+                    ctx.fillText(`v[${this.vx.toFixed(1)},${this.vy.toFixed(1)}]`, this.x - hw, this.y - hh - 10);
+                    ctx.fillText(`\u03C9:${this.v_rot.toFixed(1)}`, this.x + hw + 5, this.y + hh);
+                } else if (this.id === 2) {
+                    // Style 2: Floating ticker block right aligned
+                    ctx.font = "bold 13px Arial";
+                    ctx.fillText(tag, this.x + hw + 10, this.y - 10);
+                    ctx.fillStyle = '#fd0';
+                    ctx.fillText('>> vel: ' + this.vx.toFixed(1) + 'x' + this.vy.toFixed(1), this.x + hw + 10, this.y + 5);
+                    ctx.fillText('>> rot: ' + this.v_rot.toFixed(1) + 'r/s', this.x + hw + 10, this.y + 20);
+                } else {
+                    // Style 3: Minimalist inline tag bottom centered
+                    ctx.font = "12px sans-serif";
+                    ctx.fillText(tag, this.x, this.y + hh + 15);
+                    ctx.fillStyle = '#fa0';
+                    let metric = `| v:${this.vx.toFixed(1)}^ \u03C9:${this.v_rot.toFixed(1)} |`;
+                    ctx.fillText(metric, this.x - (ctx.measureText(metric).width/2), this.y + hh + 30);
+                }
+            }
+        }
+
+        const items = [ new FloatingItem(1, 4.99), new FloatingItem(2, 1.50), new FloatingItem(3, 8.25) ];
+
+        // Global dashboard simulation variables
+        let latencyBase = 70;
+        let pwrTrend = 40;
+
+        function loop() {
+            ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Health Dashboard Tick Logic
+            if(Math.random() < 0.1) {
+                let lat = latencyBase + (Math.random()*40);
+                // Simulate occasional spikes over 100ms
+                if(Math.random() < 0.05) lat = 110 + Math.random()*20;
+                
+                latencyEl.innerText = lat.toFixed(1) + "ms";
+                if(lat > 100) { latencyEl.className = "dash-val latency-high"; } 
+                else { latencyEl.className = "dash-val latency-ok"; }
+
+                pwrTrend = 30 + Math.random()*50;
+                npuEl.innerText = pwrTrend.toFixed(1) + "%";
+                
+                if(pwrTrend < 40) { pwrEl.innerText = "A+"; pwrEl.style.color = "#0f0"; }
+                else if(pwrTrend < 60) { pwrEl.innerText = "A"; pwrEl.style.color = "#0f0"; }
+                else if(pwrTrend < 80) { pwrEl.innerText = "B-"; pwrEl.style.color = "#fd0"; }
+                else { pwrEl.innerText = "C- (THROTTLING)"; pwrEl.style.color = "#f00"; }
+            }
+
+            // Draw Containment Zone
+            ctx.fillStyle = 'rgba(255, 150, 0, 0.2)';
+            ctx.fillRect(zone.xMin, zone.yMin, zone.xMax - zone.xMin, zone.yMax - zone.yMin);
+            ctx.strokeStyle = '#f90'; ctx.lineWidth = 2;
+            ctx.strokeRect(zone.xMin, zone.yMin, zone.xMax - zone.xMin, zone.yMax - zone.yMin);
+            ctx.fillStyle = '#fff'; ctx.font = "bold 20px sans-serif";
+            ctx.fillText("CONTAINMENT FLOAT-BAG", zone.xMin + 15, zone.yMin + 30);
+
+            let html = '';
+            for(let i=0; i<items.length; i++) {
+                items[i].update(); items[i].draw();
+                let statClass = items[i].billed ? 'billed' : 'drifting';
+                let statText = items[i].billed ? 'BILLED' : 'DRIFTING';
+                html += `
+                    <div class="item-data">
+                        Item # ${items[i].id} <span class="${statClass}">[${statText}]</span><br>
+                        <span class="telemetry">
+                            v(x,y,z) = (${items[i].vx.toFixed(1)}, ${items[i].vy.toFixed(1)}, ${items[i].vz.toFixed(1)})<br>
+                            rot_spd = ${items[i].v_rot.toFixed(1)} rad/s
+                        </span>
+                    </div>
+                `;
+            }
+            hud.innerHTML = html;
+
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
